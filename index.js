@@ -106459,14 +106459,34 @@ async function handleHeadlessModePostProcessing(systems, storageService, evaluat
         const ciSystemName = system.constructor.name.replace('System', '').toLowerCase();
         const includedRepos = await storageService.readRepoList(ciSystemName);
         // Add repositories Excel file to files to push
+        // Respect the original folder location (don't move custom files to dev-count-runs)
         const reposFilePath = storageService.getRepositoriesFilePath(ciSystemName);
         try {
             await fs.access(reposFilePath);
+            // Determine destination path: if it's a custom path, push it back to the same relative location
+            // Otherwise, push it to the same location (contributors/) or dev-count-runs/ for default files
+            const contributorsDir = storageService.getContributorsDir();
+            const defaultReposPath = path.join(contributorsDir, `repositories-${ciSystemName}.xlsx`);
+            const isCustomPath = path.resolve(reposFilePath) !== path.resolve(defaultReposPath);
+            let destPath;
+            if (isCustomPath) {
+                // Custom path: push back to the same relative location from repo root
+                destPath = path.relative(process.cwd(), reposFilePath);
+                // Ensure it's a relative path (not absolute)
+                if (path.isAbsolute(destPath) || destPath.startsWith('..')) {
+                    // If it's outside the repo, just use the filename
+                    destPath = path.basename(reposFilePath);
+                }
+            }
+            else {
+                // Default path: push back to the same location (contributors/)
+                destPath = path.relative(process.cwd(), reposFilePath);
+            }
             filesToPush.push({
                 sourcePath: reposFilePath,
-                destPath: path.join('dev-count-runs', `repositories-${ciSystemName}.xlsx`)
+                destPath: destPath
             });
-            console.log(`Added repositories file to push: ${reposFilePath}`);
+            console.log(`Added repositories file to push: ${reposFilePath} -> ${destPath}`);
         }
         catch (error) {
             console.log(`Repositories file not found at ${reposFilePath}, skipping...`);
