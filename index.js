@@ -106369,12 +106369,33 @@ async function runHeadlessMode(options) {
             switch (ciSystemName) {
                 case 'GitHub':
                     ciSystem = new github_1.GitHubSystem();
+                    // Set custom repositories file if provided (headless mode)
+                    if (options.repositoriesFileGitHub) {
+                        ciSystem.setCustomRepositoriesFile(options.repositoriesFileGitHub);
+                    }
+                    else if (options.repositoriesFile) {
+                        ciSystem.setCustomRepositoriesFile(options.repositoriesFile);
+                    }
                     break;
                 case 'GitLab':
                     ciSystem = new gitlab_1.GitLabSystem();
+                    // Set custom repositories file if provided (headless mode)
+                    if (options.repositoriesFileGitLab) {
+                        ciSystem.setCustomRepositoriesFile(options.repositoriesFileGitLab);
+                    }
+                    else if (options.repositoriesFile) {
+                        ciSystem.setCustomRepositoriesFile(options.repositoriesFile);
+                    }
                     break;
                 case 'Azure-DevOps':
                     ciSystem = new azure_devops_1.AzureDevOpsSystem();
+                    // Set custom repositories file if provided (headless mode)
+                    if (options.repositoriesFileAzureDevOps) {
+                        ciSystem.setCustomRepositoriesFile(options.repositoriesFileAzureDevOps);
+                    }
+                    else if (options.repositoriesFile) {
+                        ciSystem.setCustomRepositoriesFile(options.repositoriesFile);
+                    }
                     break;
                 default:
                     continue;
@@ -106926,6 +106947,12 @@ class AzureDevOpsSystem {
         this.domainType = 'dev.azure.com';
     }
     /**
+     * Set custom repositories file path (headless mode only)
+     */
+    setCustomRepositoriesFile(filePath) {
+        this.customRepositoriesFile = filePath;
+    }
+    /**
      * Get information about the current domain configuration
      */
     getDomainInfo() {
@@ -106970,7 +106997,8 @@ class AzureDevOpsSystem {
         const contributorsDir = path.join(process.cwd(), 'contributors');
         await fs.mkdir(contributorsDir, { recursive: true });
         // Read Excel file and populate includedRepos
-        const filePath = path.join(contributorsDir, 'repositories-azuredevops.xlsx');
+        // Use custom path if set (headless mode), otherwise use default
+        const filePath = this.customRepositoriesFile || path.join(contributorsDir, 'repositories-azuredevops.xlsx');
         try {
             // Check if file exists
             try {
@@ -107462,6 +107490,12 @@ class GitHubSystem {
     constructor() {
         this.includedRepos = new Set();
     }
+    /**
+     * Set custom repositories file path (headless mode only)
+     */
+    setCustomRepositoriesFile(filePath) {
+        this.customRepositoriesFile = filePath;
+    }
     async setConfig(config) {
         this.config = config;
         // Configure Octokit to use our global httpClient (which handles SSL, proxy, and rate limiting)
@@ -107481,7 +107515,8 @@ class GitHubSystem {
         const contributorsDir = path.join(process.cwd(), 'contributors');
         await fs.mkdir(contributorsDir, { recursive: true });
         // Read Excel file and populate includedRepos
-        const filePath = path.join(contributorsDir, 'repositories-github.xlsx');
+        // Use custom path if set (headless mode), otherwise use default
+        const filePath = this.customRepositoriesFile || path.join(contributorsDir, 'repositories-github.xlsx');
         try {
             // Check if file exists
             try {
@@ -107778,6 +107813,12 @@ class GitLabSystem {
         this.retryDelay = 5000; // 5 seconds delay between retries
         this.includedRepos = new Set();
     }
+    /**
+     * Set custom repositories file path (headless mode only)
+     */
+    setCustomRepositoriesFile(filePath) {
+        this.customRepositoriesFile = filePath;
+    }
     async setConfig(config) {
         this.config = config;
         this.baseUrl = config.domain.replace(/\/api\/v4$/, '').replace(/\/$/, '');
@@ -107785,7 +107826,8 @@ class GitLabSystem {
         const contributorsDir = path.join(process.cwd(), 'contributors');
         await fs.mkdir(contributorsDir, { recursive: true });
         // Read Excel file and populate includedRepos
-        const filePath = path.join(contributorsDir, 'repositories-gitlab.xlsx');
+        // Use custom path if set (headless mode), otherwise use default
+        const filePath = this.customRepositoriesFile || path.join(contributorsDir, 'repositories-gitlab.xlsx');
         try {
             // Check if file exists
             try {
