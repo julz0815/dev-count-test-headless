@@ -1,0 +1,38 @@
+name: Dev Count - Contributor Analysis
+
+on:
+  workflow_dispatch:
+
+jobs:
+  dev-count:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Use a token with write permissions for git push
+          token: ${{ secrets.REPO_TOKEN }}
+          fetch-depth: 0  # Fetch full history for git operations
+
+      - name: Run Dev Count (Headless Mode)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+        run: |
+          npm start -- --headless \
+            --mode 'fetch' \
+            --ci-systems 'github'  \
+            --force-reload \
+            --config 'veracode-devcount-github.yml'
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-count-results
+          path: |
+            contributors/*.xlsx
+            contributors/*.csv
+            contributors/dev-count-runs/
+          retention-days: 30
