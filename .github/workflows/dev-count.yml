@@ -24,7 +24,8 @@ jobs:
             --mode 'fetch' \
             --ci-systems 'github'  \
             --force-reload \
-            --config 'veracode-devcount-github.yml'
+            --config 'veracode-devcount-github.yml' \
+            --repositories-file-github 'repositories-github.xlsx'
 
       - name: Upload artifacts
         if: always()
