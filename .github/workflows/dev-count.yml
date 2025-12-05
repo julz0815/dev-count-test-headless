@@ -20,7 +20,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
         run: |
-          npm start -- --headless \
+          node index.js --headless \
             --mode 'fetch' \
             --ci-systems 'github'  \
             --force-reload \
