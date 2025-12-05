@@ -1,0 +1,4 @@
+dev-count:
+  - ci-system: "github"
+    domain: "https://api.github.com"
+    regex: "/github\\.com$/i"
