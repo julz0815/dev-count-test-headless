@@ -104158,6 +104158,12 @@ class EvaluationService {
     setCustomRepositoriesFile(ciSystem, filePath) {
         this.customRepositoriesFiles.set(ciSystem.toLowerCase(), filePath);
     }
+    /**
+     * Set the contributors directory (to sync with StorageService)
+     */
+    setContributorsDir(dir) {
+        this.contributorsDir = dir;
+    }
     setConfig(config) {
         this.config = config;
         const ciSystem = config.ciSystem.toLowerCase();
@@ -104211,10 +104217,22 @@ class EvaluationService {
         const filePath = path.join(this.contributorsDir, ciSystem.toLowerCase(), repo.path.replace(/\//g, '_'), 'commits.json');
         try {
             const data = await fs.readFile(filePath, 'utf-8');
-            return JSON.parse(data);
+            const commits = JSON.parse(data);
+            if (process.argv.includes('--debug')) {
+                console.log(`Read ${commits.length} commits from ${filePath} for ${repo.path}`);
+            }
+            return commits;
         }
         catch (error) {
-            console.error(`Error reading commits for ${repo.path}:`, error);
+            // Only log if file doesn't exist (ENOENT), other errors are more serious
+            if (error?.code === 'ENOENT') {
+                if (process.argv.includes('--debug')) {
+                    console.log(`No commits file found for ${repo.path} at ${filePath}`);
+                }
+            }
+            else {
+                console.error(`Error reading commits for ${repo.path} from ${filePath}:`, error);
+            }
             return [];
         }
     }
@@ -104387,7 +104405,13 @@ class EvaluationService {
         };
         for (const repo of repos) {
             const commits = await this.readCommits(ciSystem, repo);
+            if (process.argv.includes('--debug')) {
+                console.log(`Evaluating ${repo.path}: ${commits.length} commits`);
+            }
             const { contributors, removedContributors } = this.extractContributors(commits, ciSystem);
+            if (process.argv.includes('--debug')) {
+                console.log(`Extracted ${contributors.length} contributors from ${repo.path}`);
+            }
             repoContributors.push({
                 repo: repo.path,
                 contributors,
@@ -105765,6 +105789,19 @@ class FileStorageService {
     setCustomRepositoriesFile(ciSystem, filePath) {
         this.customRepositoriesFiles.set(ciSystem.toLowerCase(), filePath);
     }
+    /**
+     * Get the repositories file path for a CI system (returns custom path if set, otherwise default)
+     */
+    getRepositoriesFilePath(ciSystem) {
+        const ciSystemLower = ciSystem.toLowerCase();
+        if (this.customRepositoriesFiles.has(ciSystemLower)) {
+            return this.customRepositoriesFiles.get(ciSystemLower);
+        }
+        return path.join(this.contributorsDir, `repositories-${ciSystemLower}.xlsx`);
+    }
+    getContributorsDir() {
+        return this.contributorsDir;
+    }
     async setConfig(config) {
         this.config = config;
         await fs.mkdir(this.contributorsDir, { recursive: true });
@@ -106210,6 +106247,8 @@ const inquirer_1 = __importDefault(__nccwpck_require__(87615));
 async function runHeadlessMode(options) {
     const storageService = new storage_1.FileStorageService();
     const evaluationService = new evaluation_1.EvaluationService();
+    // Ensure both services use the same contributorsDir
+    evaluationService.setContributorsDir(storageService.getContributorsDir());
     // Use custom config path if provided
     const configService = new config_1.ConfigService(options.configFile);
     if (options.configFile) {
@@ -106415,10 +106454,23 @@ async function handleHeadlessModePostProcessing(systems, storageService, evaluat
         sourcePath: summaryPath,
         destPath: path.join('dev-count-runs', `scm_summary_${dateSuffix}.xlsx`)
     });
-    // Generate CSV files for each CI system
+    // Generate CSV files and add repositories Excel files for each CI system
     for (const { system, repos } of systems) {
         const ciSystemName = system.constructor.name.replace('System', '').toLowerCase();
         const includedRepos = await storageService.readRepoList(ciSystemName);
+        // Add repositories Excel file to files to push
+        const reposFilePath = storageService.getRepositoriesFilePath(ciSystemName);
+        try {
+            await fs.access(reposFilePath);
+            filesToPush.push({
+                sourcePath: reposFilePath,
+                destPath: path.join('dev-count-runs', `repositories-${ciSystemName}.xlsx`)
+            });
+            console.log(`Added repositories file to push: ${reposFilePath}`);
+        }
+        catch (error) {
+            console.log(`Repositories file not found at ${reposFilePath}, skipping...`);
+        }
         if (includedRepos.length > 0) {
             // Pass evaluation service to use the same contributor extraction logic as Excel tabs
             const csvPath = await storageService.writeRunCSV(ciSystemName, includedRepos, dateSuffix, evaluationService);
@@ -106502,7 +106554,8 @@ async function processSystems(systems, storageService, evaluationService, fetchC
         if (config.forceReload) {
             console.log('Force reload enabled - fetching fresh repository list...');
             const freshRepos = await system.getRepos();
-            const systemDir = path.join('contributors', system.constructor.name.toLowerCase().replace('system', ''));
+            const contributorsDir = storageService.getContributorsDir();
+            const systemDir = path.join(contributorsDir, system.constructor.name.toLowerCase().replace('system', ''));
             try {
                 await fs.rm(systemDir, { recursive: true, force: true });
                 console.log(`Cleared existing data in ${systemDir}`);
@@ -106522,7 +106575,8 @@ async function processSystems(systems, storageService, evaluationService, fetchC
                 console.log(`\nProcessing ${repo.path}...`);
                 try {
                     if (!config.forceReload) {
-                        const commitFile = path.join('contributors', system.constructor.name.toLowerCase().replace('system', ''), repo.path.replace(/\//g, '_'), 'commits.json');
+                        const contributorsDir = storageService.getContributorsDir();
+                        const commitFile = path.join(contributorsDir, system.constructor.name.toLowerCase().replace('system', ''), repo.path.replace(/\//g, '_'), 'commits.json');
                         if (await fs.access(commitFile).then(() => true).catch(() => false)) {
                             console.log(`Skipping ${repo.path} - commit file already exists`);
                             continue;
@@ -106561,6 +106615,8 @@ async function main() {
         // Interactive mode (existing code)
         const storageService = new storage_1.FileStorageService();
         const evaluationService = new evaluation_1.EvaluationService();
+        // Ensure both services use the same contributorsDir
+        evaluationService.setContributorsDir(storageService.getContributorsDir());
         const configService = new config_1.ConfigService();
         const systems = [];
         let addAnother = true;
@@ -106691,7 +106747,8 @@ async function main() {
                 // Ask if user wants to review repositories
                 const { reviewRepos } = await cli_1.CLI.promptReviewRepos(ciSystemName);
                 if (reviewRepos) {
-                    const excelPath = path.join(process.cwd(), 'contributors', `repositories-${ciSystemName.toLowerCase()}.xlsx`);
+                    const contributorsDir = storageService.getContributorsDir();
+                    const excelPath = path.join(contributorsDir, `repositories-${ciSystemName.toLowerCase()}.xlsx`);
                     console.log(`\nPlease review the repository list in: ${excelPath}`);
                     console.log('The tool is waiting. Press Enter when you are done reviewing the file...');
                     // Ensure stdin is in the right mode
