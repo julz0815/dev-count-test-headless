@@ -104220,7 +104220,8 @@ class EvaluationService {
     }
     async readCommits(ciSystem, repo) {
         const normalizedSystem = this.normalizeSystemName(ciSystem);
-        const filePath = path.join(this.contributorsDir, normalizedSystem, repo.path.replace(/\//g, '_'), 'commits.json');
+        const normalizedRepoPath = repo.path.replace(/\//g, '_');
+        const filePath = path.join(this.contributorsDir, normalizedSystem, normalizedRepoPath, 'commits.json');
         try {
             const data = await fs.readFile(filePath, 'utf-8');
             const commits = JSON.parse(data);
@@ -104233,6 +104234,9 @@ class EvaluationService {
             // Log all read failures to help diagnose the issue
             if (error?.code === 'ENOENT') {
                 console.log(`  Warning: No commits file found for ${repo.path} at ${filePath}`);
+                console.log(`    Looking for: ${normalizedSystem}/${normalizedRepoPath}/commits.json`);
+                console.log(`    CI System input: "${ciSystem}" -> normalized: "${normalizedSystem}"`);
+                console.log(`    Repo path: "${repo.path}" -> normalized: "${normalizedRepoPath}"`);
             }
             else {
                 console.error(`  Error reading commits for ${repo.path} from ${filePath}:`, error);
@@ -104409,6 +104413,10 @@ class EvaluationService {
         };
         console.log(`\nEvaluating contributors for ${repos.length} repositories (CI System: ${ciSystem})`);
         console.log(`Using contributorsDir: ${this.contributorsDir}`);
+        console.log(`Normalized CI System: ${this.normalizeSystemName(ciSystem)}`);
+        if (repos.length > 0 && repos.length <= 5) {
+            console.log(`Repos to evaluate: ${repos.map(r => r.path).join(', ')}`);
+        }
         for (const repo of repos) {
             const commits = await this.readCommits(ciSystem, repo);
             console.log(`  ${repo.path}: ${commits.length} commits found`);
@@ -105968,12 +105976,15 @@ class FileStorageService {
             if (rowNumber > 1) { // Skip header row
                 const include = row.getCell(5).value;
                 if (include?.toString().toUpperCase() === 'Y') {
-                    repos.push({
-                        name: row.getCell(2).value,
-                        org: row.getCell(1).value,
-                        path: row.getCell(3).value,
-                        platform: ciSystem
-                    });
+                    const repoPath = row.getCell(3).value?.trim();
+                    if (repoPath) {
+                        repos.push({
+                            name: row.getCell(2).value?.trim() || '',
+                            org: row.getCell(1).value?.trim() || '',
+                            path: repoPath,
+                            platform: ciSystem
+                        });
+                    }
                 }
             }
         });
@@ -106017,13 +106028,17 @@ class FileStorageService {
         }
         // Always create the file, even if commits is empty
         const normalizedSystem = this.normalizeSystemName(ciSystem);
+        const normalizedRepoPath = repo.path.replace(/\//g, '_');
         const systemDir = path.join(this.contributorsDir, normalizedSystem);
         await fs.mkdir(systemDir, { recursive: true });
-        const repoDir = path.join(systemDir, repo.path.replace(/\//g, '_'));
+        const repoDir = path.join(systemDir, normalizedRepoPath);
         await fs.mkdir(repoDir, { recursive: true });
         const filePath = path.join(repoDir, 'commits.json');
+        console.log(`  Storing commits to: ${normalizedSystem}/${normalizedRepoPath}/commits.json`);
+        console.log(`    CI System: "${ciSystem}" -> normalized: "${normalizedSystem}"`);
+        console.log(`    Repo path: "${repo.path}" -> normalized: "${normalizedRepoPath}"`);
         if (process.argv.includes('--debug')) {
-            console.log(`  Storing commits to: ${filePath} (CI System: ${ciSystem} -> ${normalizedSystem})`);
+            console.log(`  Full path: ${filePath}`);
         }
         // Create a temporary file first
         const tempFilePath = `${filePath}.tmp`;
