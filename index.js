@@ -103730,11 +103730,33 @@ class ConfigService {
             }
             const systemConfig = config['dev-count'].find(c => c['ci-system'] === ciSystem.toLowerCase());
             if (!systemConfig) {
+                if (process.argv.includes('--debug')) {
+                    console.error(`No config found for CI system: ${ciSystem.toLowerCase()}`);
+                    console.error(`Available CI systems in config:`, config['dev-count'].map((c) => c['ci-system']));
+                }
                 return { config: null, useExisting: false };
             }
+            // Check if we're in headless mode
+            const isHeadless = process.argv.includes('--headless') ||
+                process.argv.includes('--non-interactive') ||
+                process.argv.includes('-n');
             // Display the existing configuration
             this.displayConfig(systemConfig);
-            // Ask if the configuration is correct
+            // In headless mode, skip the interactive prompt and return the config directly
+            if (isHeadless) {
+                return {
+                    config: {
+                        token: systemConfig['ci-token'],
+                        domain: systemConfig.domain || '',
+                        orgs: systemConfig.org || undefined,
+                        regexPattern: systemConfig.regex,
+                        regexFile: systemConfig['regex-file'],
+                        ciSystem: ciSystem,
+                    },
+                    useExisting: true
+                };
+            }
+            // Ask if the configuration is correct (interactive mode only)
             const { useExisting } = await inquirer_1.default.prompt([
                 {
                     type: 'confirm',
@@ -103760,6 +103782,9 @@ class ConfigService {
         }
         catch (error) {
             // If file doesn't exist or can't be read, return null
+            if (process.argv.includes('--debug')) {
+                console.error('Error reading config file:', error);
+            }
             return { config: null, useExisting: false };
         }
     }
@@ -106072,6 +106097,9 @@ async function runHeadlessMode(options) {
             const { config: existingConfig } = await configService.readConfig(ciSystemName);
             if (!existingConfig) {
                 console.error(`No configuration found for ${ciSystemName}. Please run in interactive mode first to set up configuration.`);
+                if (process.argv.includes('--debug')) {
+                    console.error(`Config service path: ${configService.configPath || 'unknown'}`);
+                }
                 continue;
             }
             // Override token from environment variable if available
@@ -106163,8 +106191,16 @@ async function runHeadlessMode(options) {
     // Process all collected systems
     await processSystems(systems, storageService, evaluationService, mode === 'fetch');
     // In headless mode, generate CSVs and push to repository
-    if (mode === 'fetch') {
-        await handleHeadlessModePostProcessing(systems, storageService, evaluationService);
+    // Only run post-processing if we have systems to process
+    if (mode === 'fetch' && systems.length > 0) {
+        try {
+            await handleHeadlessModePostProcessing(systems, storageService, evaluationService);
+        }
+        catch (error) {
+            console.error('Error in headless mode post-processing:', error);
+            // Don't fail the entire run if post-processing fails
+            console.log('Continuing despite post-processing error...');
+        }
     }
 }
 /**
@@ -106175,7 +106211,24 @@ async function handleHeadlessModePostProcessing(systems, storageService, evaluat
     const filesToPush = [];
     console.log('\n=== Headless Mode Post-Processing ===');
     // Generate dated scm_summary.xlsx
-    const summaryPath = await evaluationService.writeSummaryWithDate(dateSuffix);
+    // Check if summary file exists first (it should have been created during processSystems)
+    let summaryPath;
+    try {
+        summaryPath = await evaluationService.writeSummaryWithDate(dateSuffix);
+    }
+    catch (error) {
+        console.error('Error generating summary file:', error);
+        // Try to use the default summary file if dated one fails
+        const defaultSummaryPath = path.join(process.cwd(), 'contributors', 'scm_summary.xlsx');
+        try {
+            await fs.access(defaultSummaryPath);
+            summaryPath = defaultSummaryPath;
+            console.log(`Using default summary file: ${defaultSummaryPath}`);
+        }
+        catch {
+            throw new Error('Could not find or create summary file');
+        }
+    }
     filesToPush.push({
         sourcePath: summaryPath,
         destPath: path.join('dev-count-runs', `scm_summary_${dateSuffix}.xlsx`)
