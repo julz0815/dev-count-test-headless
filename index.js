@@ -106317,8 +106317,9 @@ async function handleHeadlessModePostProcessing(systems, storageService, evaluat
 async function pushFilesToRepository(files, commitMessage) {
     const gitService = new git_service_1.GitService();
     // Try to get token from environment variables (check all CI systems)
+    // For GitHub, prefer GITHUB_PAT (custom PAT) over GITHUB_TOKEN (may have limited permissions)
     const tokens = {
-        github: process.env.GITHUB_TOKEN,
+        github: process.env.GITHUB_PAT || process.env.GITHUB_TOKEN,
         gitlab: process.env.GITLAB_TOKEN,
         azureDevOps: process.env.AZURE_DEVOPS_TOKEN
     };
@@ -106326,7 +106327,7 @@ async function pushFilesToRepository(files, commitMessage) {
     const token = tokens.github || tokens.gitlab || tokens.azureDevOps;
     if (!token) {
         console.log('No token found in environment variables. Skipping git push.');
-        console.log('Set GITHUB_TOKEN, GITLAB_TOKEN, or AZURE_DEVOPS_TOKEN to enable git push.');
+        console.log('Set GITHUB_PAT (or GITHUB_TOKEN), GITLAB_TOKEN, or AZURE_DEVOPS_TOKEN to enable git push.');
         return;
     }
     try {
@@ -106340,11 +106341,13 @@ async function pushFilesToRepository(files, commitMessage) {
 }
 /**
  * Get token from environment variable
+ * For GitHub, checks GITHUB_PAT first (custom PAT), then GITHUB_TOKEN (may be limited in CI)
  */
 function getTokenFromEnv(ciSystemName) {
     switch (ciSystemName) {
         case 'GitHub':
-            return process.env.GITHUB_TOKEN;
+            // Check for custom PAT first (for CI environments where GITHUB_TOKEN has limited permissions)
+            return process.env.GITHUB_PAT || process.env.GITHUB_TOKEN;
         case 'GitLab':
             return process.env.GITLAB_TOKEN;
         case 'Azure-DevOps':
