@@ -103583,6 +103583,24 @@ function parseArgs() {
     if (configFileAliasIndex !== -1 && args[configFileAliasIndex + 1]) {
         options.configFile = args[configFileAliasIndex + 1];
     }
+    // Parse repositories file paths (headless mode only)
+    const reposFileIndex = args.indexOf('--repositories-file');
+    if (reposFileIndex !== -1 && args[reposFileIndex + 1]) {
+        options.repositoriesFile = args[reposFileIndex + 1];
+    }
+    // Parse CI system specific repositories file paths
+    const reposFileGitHubIndex = args.indexOf('--repositories-file-github');
+    if (reposFileGitHubIndex !== -1 && args[reposFileGitHubIndex + 1]) {
+        options.repositoriesFileGitHub = args[reposFileGitHubIndex + 1];
+    }
+    const reposFileGitLabIndex = args.indexOf('--repositories-file-gitlab');
+    if (reposFileGitLabIndex !== -1 && args[reposFileGitLabIndex + 1]) {
+        options.repositoriesFileGitLab = args[reposFileGitLabIndex + 1];
+    }
+    const reposFileAzureDevOpsIndex = args.indexOf('--repositories-file-azure-devops');
+    if (reposFileAzureDevOpsIndex !== -1 && args[reposFileAzureDevOpsIndex + 1]) {
+        options.repositoriesFileAzureDevOps = args[reposFileAzureDevOpsIndex + 1];
+    }
     return options;
 }
 /**
@@ -103612,6 +103630,19 @@ Options:
                         Custom path to config YAML file (headless mode only)
                         Default: ~/.veracode/veracode-devcount.yml
   
+  --repositories-file <path>
+                        Custom path to repositories Excel file (headless mode only)
+                        Applies to all CI systems. Overridden by system-specific flags.
+  
+  --repositories-file-github <path>
+                        Custom path to GitHub repositories Excel file (headless mode only)
+  
+  --repositories-file-gitlab <path>
+                        Custom path to GitLab repositories Excel file (headless mode only)
+  
+  --repositories-file-azure-devops <path>
+                        Custom path to Azure DevOps repositories Excel file (headless mode only)
+  
   --debug                Enable debug logging
 
 Environment Variables (for headless mode):
@@ -103640,6 +103671,20 @@ Examples:
   
   # Headless mode with custom config file
   npm start -- --headless --config /path/to/custom-config.yml
+  
+  # Headless mode with custom repositories file for all CI systems
+  npm start -- --headless --repositories-file /path/to/repositories.xlsx
+  
+  # Headless mode with custom repositories file for specific CI system
+  npm start -- --headless --repositories-file-github /path/to/repositories-github.xlsx
+  npm start -- --headless --repositories-file-gitlab /path/to/repositories-gitlab.xlsx
+  npm start -- --headless --repositories-file-azure-devops /path/to/repositories-azuredevops.xlsx
+  
+  # Headless mode with custom repositories file for all CI systems
+  npm start -- --headless --repositories-file /path/to/repositories.xlsx
+  
+  # Headless mode with custom repositories file for specific CI system
+  npm start -- --headless --repositories-file-github /path/to/repositories-github.xlsx
 `;
 }
 
@@ -104085,6 +104130,7 @@ class EvaluationService {
     constructor() {
         this.config = null;
         this.regexPatterns = new Map();
+        this.customRepositoriesFiles = new Map(); // CI system -> file path
         this.contributorsDir = path.join(process.cwd(), 'contributors');
         const now = new Date();
         this.summary = {
@@ -104105,6 +104151,12 @@ class EvaluationService {
                 azureDevOps: 0
             }
         };
+    }
+    /**
+     * Set custom repositories file path for a CI system (headless mode only)
+     */
+    setCustomRepositoriesFile(ciSystem, filePath) {
+        this.customRepositoriesFiles.set(ciSystem.toLowerCase(), filePath);
     }
     setConfig(config) {
         this.config = config;
@@ -104398,7 +104450,15 @@ class EvaluationService {
         return this.writeSummary(dateSuffix);
     }
     async readRepoList(ciSystem) {
-        const filePath = path.join(this.contributorsDir, `repositories-${ciSystem.toLowerCase()}.xlsx`);
+        // Check if custom repositories file path is set (headless mode)
+        const ciSystemLower = ciSystem.toLowerCase();
+        let filePath;
+        if (this.customRepositoriesFiles.has(ciSystemLower)) {
+            filePath = this.customRepositoriesFiles.get(ciSystemLower);
+        }
+        else {
+            filePath = path.join(this.contributorsDir, `repositories-${ciSystemLower}.xlsx`);
+        }
         try {
             await fs.access(filePath);
         }
@@ -104428,7 +104488,15 @@ class EvaluationService {
         return repos;
     }
     async getTotalRepoCount(ciSystem) {
-        const filePath = path.join(this.contributorsDir, `repositories-${ciSystem.toLowerCase()}.xlsx`);
+        // Check if custom repositories file path is set (headless mode)
+        const ciSystemLower = ciSystem.toLowerCase();
+        let filePath;
+        if (this.customRepositoriesFiles.has(ciSystemLower)) {
+            filePath = this.customRepositoriesFiles.get(ciSystemLower);
+        }
+        else {
+            filePath = path.join(this.contributorsDir, `repositories-${ciSystemLower}.xlsx`);
+        }
         try {
             await fs.access(filePath);
         }
@@ -105688,7 +105756,14 @@ const path = __importStar(__nccwpck_require__(16928));
 const exceljs_1 = __importDefault(__nccwpck_require__(16806));
 class FileStorageService {
     constructor() {
+        this.customRepositoriesFiles = new Map(); // CI system -> file path
         this.contributorsDir = path.join(process.cwd(), 'contributors');
+    }
+    /**
+     * Set custom repositories file path for a CI system (headless mode only)
+     */
+    setCustomRepositoriesFile(ciSystem, filePath) {
+        this.customRepositoriesFiles.set(ciSystem.toLowerCase(), filePath);
     }
     async setConfig(config) {
         this.config = config;
@@ -105702,7 +105777,18 @@ class FileStorageService {
             console.log('Filename:', `repositories-${ciSystem.toLowerCase()}.xlsx`);
             console.log('--------------------------------');
         }
-        const filename = path.join(this.contributorsDir, `repositories-${ciSystem.toLowerCase()}.xlsx`);
+        // Check if custom repositories file path is set (headless mode)
+        const ciSystemLower = ciSystem.toLowerCase();
+        let filename;
+        if (this.customRepositoriesFiles.has(ciSystemLower)) {
+            filename = this.customRepositoriesFiles.get(ciSystemLower);
+            // Ensure directory exists
+            const dir = path.dirname(filename);
+            await fs.mkdir(dir, { recursive: true });
+        }
+        else {
+            filename = path.join(this.contributorsDir, `repositories-${ciSystemLower}.xlsx`);
+        }
         // Read existing file if it exists to preserve Include values
         const existingRepos = new Map();
         try {
@@ -105785,12 +105871,20 @@ class FileStorageService {
         }
     }
     async readRepoList(ciSystem) {
-        const filePath = path.join(this.contributorsDir, `repositories-${ciSystem.toLowerCase()}.xlsx`);
+        // Check if custom repositories file path is set (headless mode)
+        const ciSystemLower = ciSystem.toLowerCase();
+        let filePath;
+        if (this.customRepositoriesFiles.has(ciSystemLower)) {
+            filePath = this.customRepositoriesFiles.get(ciSystemLower);
+        }
+        else {
+            filePath = path.join(this.contributorsDir, `repositories-${ciSystemLower}.xlsx`);
+        }
         if (process.argv.includes('--debug')) {
             console.log('--------------------------------');
             console.log('storage.ts - readRepoList');
             console.log('CI System:', ciSystem);
-            console.log('Filename:', `repositories-${ciSystem.toLowerCase()}.xlsx`);
+            console.log('File Path:', filePath);
             console.log('--------------------------------');
         }
         try {
@@ -106123,6 +106217,33 @@ async function runHeadlessMode(options) {
     }
     const systems = [];
     console.log('Running in headless mode...\n');
+    // Set custom repositories file paths if provided (headless mode only)
+    if (options.repositoriesFile) {
+        // Apply to all CI systems
+        storageService.setCustomRepositoriesFile('github', options.repositoriesFile);
+        storageService.setCustomRepositoriesFile('gitlab', options.repositoriesFile);
+        storageService.setCustomRepositoriesFile('azuredevops', options.repositoriesFile);
+        evaluationService.setCustomRepositoriesFile('github', options.repositoriesFile);
+        evaluationService.setCustomRepositoriesFile('gitlab', options.repositoriesFile);
+        evaluationService.setCustomRepositoriesFile('azuredevops', options.repositoriesFile);
+        console.log(`Using custom repositories file for all CI systems: ${options.repositoriesFile}\n`);
+    }
+    // Set CI system specific repositories file paths
+    if (options.repositoriesFileGitHub) {
+        storageService.setCustomRepositoriesFile('github', options.repositoriesFileGitHub);
+        evaluationService.setCustomRepositoriesFile('github', options.repositoriesFileGitHub);
+        console.log(`Using custom GitHub repositories file: ${options.repositoriesFileGitHub}`);
+    }
+    if (options.repositoriesFileGitLab) {
+        storageService.setCustomRepositoriesFile('gitlab', options.repositoriesFileGitLab);
+        evaluationService.setCustomRepositoriesFile('gitlab', options.repositoriesFileGitLab);
+        console.log(`Using custom GitLab repositories file: ${options.repositoriesFileGitLab}`);
+    }
+    if (options.repositoriesFileAzureDevOps) {
+        storageService.setCustomRepositoriesFile('azuredevops', options.repositoriesFileAzureDevOps);
+        evaluationService.setCustomRepositoriesFile('azuredevops', options.repositoriesFileAzureDevOps);
+        console.log(`Using custom Azure DevOps repositories file: ${options.repositoriesFileAzureDevOps}`);
+    }
     // Use existing global network config or empty
     let globalNetworkConfig = await configService.readGlobalNetworkConfig() || {};
     if (globalNetworkConfig.ssl || globalNetworkConfig.proxy || globalNetworkConfig.rateLimit) {
@@ -106222,7 +106343,9 @@ async function runHeadlessMode(options) {
                     continue;
             }
             try {
-                const repos = await storageService.readRepoList(ciSystemName.replace('-', ''));
+                // Use the same custom repositories file path if set
+                const ciSystemForFile = ciSystemName.replace('-', '').toLowerCase();
+                const repos = await storageService.readRepoList(ciSystemForFile);
                 if (repos.length > 0) {
                     let ciSystem;
                     switch (ciSystemName) {
