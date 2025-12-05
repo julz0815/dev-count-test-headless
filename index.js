@@ -104213,8 +104213,14 @@ class EvaluationService {
             return false;
         return patterns.some(regex => regex.test(email));
     }
+    normalizeSystemName(ciSystem) {
+        // Normalize system names consistently: "AzureDevOps" or "Azure-DevOps" -> "azuredevops"
+        const normalized = ciSystem.toLowerCase().replace(/-/g, '');
+        return normalized;
+    }
     async readCommits(ciSystem, repo) {
-        const filePath = path.join(this.contributorsDir, ciSystem.toLowerCase(), repo.path.replace(/\//g, '_'), 'commits.json');
+        const normalizedSystem = this.normalizeSystemName(ciSystem);
+        const filePath = path.join(this.contributorsDir, normalizedSystem, repo.path.replace(/\//g, '_'), 'commits.json');
         try {
             const data = await fs.readFile(filePath, 'utf-8');
             const commits = JSON.parse(data);
@@ -104224,14 +104230,12 @@ class EvaluationService {
             return commits;
         }
         catch (error) {
-            // Only log if file doesn't exist (ENOENT), other errors are more serious
+            // Log all read failures to help diagnose the issue
             if (error?.code === 'ENOENT') {
-                if (process.argv.includes('--debug')) {
-                    console.log(`No commits file found for ${repo.path} at ${filePath}`);
-                }
+                console.log(`  Warning: No commits file found for ${repo.path} at ${filePath}`);
             }
             else {
-                console.error(`Error reading commits for ${repo.path} from ${filePath}:`, error);
+                console.error(`  Error reading commits for ${repo.path} from ${filePath}:`, error);
             }
             return [];
         }
@@ -104403,12 +104407,16 @@ class EvaluationService {
             contributors: [],
             removedContributors: []
         };
+        console.log(`\nEvaluating contributors for ${repos.length} repositories (CI System: ${ciSystem})`);
+        console.log(`Using contributorsDir: ${this.contributorsDir}`);
         for (const repo of repos) {
             const commits = await this.readCommits(ciSystem, repo);
+            console.log(`  ${repo.path}: ${commits.length} commits found`);
             if (process.argv.includes('--debug')) {
                 console.log(`Evaluating ${repo.path}: ${commits.length} commits`);
             }
             const { contributors, removedContributors } = this.extractContributors(commits, ciSystem);
+            console.log(`  ${repo.path}: ${contributors.length} contributors extracted (${removedContributors.length} excluded)`);
             if (process.argv.includes('--debug')) {
                 console.log(`Extracted ${contributors.length} contributors from ${repo.path}`);
             }
@@ -104433,7 +104441,7 @@ class EvaluationService {
             });
         }
         // Update summary counts
-        const normalizedSystem = ciSystem.toLowerCase();
+        const normalizedSystem = this.normalizeSystemName(ciSystem);
         const totalRepos = await this.getTotalRepoCount(normalizedSystem);
         switch (normalizedSystem) {
             case 'gitlab':
@@ -105997,17 +106005,26 @@ class FileStorageService {
         });
         await workbook.xlsx.writeFile(path.join(this.contributorsDir, 'contributor_summary.xlsx'));
     }
+    normalizeSystemName(ciSystem) {
+        // Normalize system names consistently: "AzureDevOps" or "Azure-DevOps" -> "azuredevops"
+        const normalized = ciSystem.toLowerCase().replace(/-/g, '');
+        return normalized;
+    }
     async storeCommits(ciSystem, repo, commits) {
         if (!Array.isArray(commits)) {
             console.error(`Invalid commits data for ${repo.path}: expected array but got ${typeof commits}`);
             return;
         }
         // Always create the file, even if commits is empty
-        const systemDir = path.join(this.contributorsDir, ciSystem.toLowerCase());
+        const normalizedSystem = this.normalizeSystemName(ciSystem);
+        const systemDir = path.join(this.contributorsDir, normalizedSystem);
         await fs.mkdir(systemDir, { recursive: true });
         const repoDir = path.join(systemDir, repo.path.replace(/\//g, '_'));
         await fs.mkdir(repoDir, { recursive: true });
         const filePath = path.join(repoDir, 'commits.json');
+        if (process.argv.includes('--debug')) {
+            console.log(`  Storing commits to: ${filePath} (CI System: ${ciSystem} -> ${normalizedSystem})`);
+        }
         // Create a temporary file first
         const tempFilePath = `${filePath}.tmp`;
         try {
@@ -106048,7 +106065,8 @@ class FileStorageService {
         }
     }
     async readCommits(ciSystem, repo) {
-        const filePath = path.join(this.contributorsDir, ciSystem.toLowerCase(), repo.path.replace(/\//g, '_'), 'commits.json');
+        const normalizedSystem = this.normalizeSystemName(ciSystem);
+        const filePath = path.join(this.contributorsDir, normalizedSystem, repo.path.replace(/\//g, '_'), 'commits.json');
         try {
             await fs.access(filePath);
             const data = await fs.readFile(filePath, 'utf-8');
@@ -106603,8 +106621,9 @@ async function processSystems(systems, storageService, evaluationService, fetchC
                         }
                     }
                     const commits = await system.getCommits(repo);
+                    console.log(`  Fetched ${commits.length} commits for ${repo.path}`);
                     await storageService.storeCommits(system.constructor.name.replace('System', ''), repo, commits);
-                    console.log(`Stored commits for ${repo.path}`);
+                    console.log(`Stored commits for ${repo.path} (${commits.length} commits)`);
                 }
                 catch (error) {
                     console.error(`Error processing ${repo.path}:`, error);
